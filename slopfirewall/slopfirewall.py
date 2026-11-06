@@ -28,12 +28,15 @@ import json
 import re
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 CACHE_TTL_S = 7 * 24 * 3600
 HTTP_TIMEOUT_S = 6.0
+DEFAULT_WORKERS = 8
 UA = "slopfirewall/0.1 (+supply-chain hygiene)"
 
 EXIT_OK, EXIT_HALLUCINATION, EXIT_UNKNOWN, EXIT_USAGE = 0, 1, 2, 3
@@ -141,10 +144,14 @@ def parse_install_targets(text: str) -> list[str]:
 
 
 class _Cache:
+    """线程安全的判定缓存：put 只改内存，由 flush() 批量落盘（避免 O(n²) 重写）。"""
+
     def __init__(self, path: Path | None, ttl: float = CACHE_TTL_S) -> None:
         self.path = path
         self.ttl = ttl
         self.data: dict[str, tuple[str, float]] = {}
+        self._dirty = False
+        self._lock = threading.Lock()
         if path and path.exists():
             try:
                 self.data = {k: tuple(v) for k, v in
@@ -153,21 +160,30 @@ class _Cache:
                 self.data = {}
 
     def get(self, key: str) -> str | None:
-        hit = self.data.get(key)
+        with self._lock:
+            hit = self.data.get(key)
         if hit and time.time() - hit[1] < self.ttl:
             return hit[0]
         return None
 
     def put(self, key: str, verdict: str) -> None:
-        if not self.path:
-            return
-        self.data[key] = (verdict, time.time())
+        with self._lock:
+            self.data[key] = (verdict, time.time())
+            self._dirty = True
+
+    def flush(self) -> None:
+        with self._lock:
+            if not (self.path and self._dirty):
+                return
+            snapshot = {k: list(v) for k, v in self.data.items()}
+            self._dirty = False
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(
-                json.dumps({k: list(v) for k, v in self.data.items()}), encoding="utf-8")
+            self.path.write_text(json.dumps(snapshot), encoding="utf-8")
         except OSError:
             pass
+
+    save = flush  # 兼容旧调用名
 
 
 def _http_status(url: str) -> int | None:
@@ -186,6 +202,10 @@ def check_one(name: str, seeds: set[str], cache: _Cache | None) -> str:
     key = _normalize(name)
     if key in seeds:
         return "seed"
+    # 包名只允许字母数字与 ._-，且必须整体匹配——任何 ?/#/@/空白都判无效，
+    # 防止拼接 URL 时把查询串、锚点或备用主机带进请求（SSRF 加固）
+    if not key or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", key):
+        return "unknown"
     if cache:
         hit = cache.get(key)
         if hit:
@@ -225,14 +245,26 @@ def extract_package_names(text: str) -> list[str]:
 
 
 def check_packages(names: list[str], seeds: set[str] | None = None,
-                   cache: _Cache | None = None) -> tuple[str, int]:
-    """核查包名列表，返回 (报告, 退出码)。"""
+                   cache: _Cache | None = None,
+                   workers: int = DEFAULT_WORKERS) -> tuple[str, int]:
+    """核查包名列表（并发网络请求），返回 (报告, 退出码)。"""
     if not names:
         return "slopfirewall：没有解析到包名", EXIT_USAGE
     seeds = seeds or set()
+    try:
+        workers = max(1, min(int(workers), 16))
+    except (TypeError, ValueError):
+        workers = DEFAULT_WORKERS
+    if len(names) > 1 and workers > 1:
+        with ThreadPoolExecutor(max_workers=min(workers, len(names))) as ex:
+            verdicts = list(ex.map(lambda n: check_one(n, seeds, cache), names))
+    else:
+        verdicts = [check_one(n, seeds, cache) for n in names]
+    if cache:
+        cache.flush()
+
     lines, n_ok, n_bad, n_unknown = [], 0, 0, 0
-    for n in names[:16]:
-        v = check_one(n, seeds, cache)
+    for n, v in zip(names, verdicts):
         if v == "seed":
             n_bad += 1
             lines.append(f"⛔ {n} — 命中已知幻觉包名种子库，禁止安装")
@@ -307,12 +339,16 @@ def main() -> int:
     p_check.add_argument("--seed", help="种子库文件（缺省用内置 hallucinated_seeds.txt）")
     p_check.add_argument("--cache", help="缓存文件路径（缺省 ~/.cache/slopfirewall/cache.json）")
     p_check.add_argument("--no-cache", action="store_true")
+    p_check.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                         help=f"并发核查线程数（默认 {DEFAULT_WORKERS}，上限 16）")
 
     p_scan = sub.add_parser("scan", help="扫描文件或目录（requirements*/pyproject.toml）并核查")
     p_scan.add_argument("file", nargs="?", default=".", help="文件 / 目录 / -（stdin）；缺省扫描当前目录")
     p_scan.add_argument("--seed")
     p_scan.add_argument("--cache")
     p_scan.add_argument("--no-cache", action="store_true")
+    p_scan.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help=f"并发核查线程数（默认 {DEFAULT_WORKERS}，上限 16）")
 
     a = ap.parse_args()
     seeds = load_seeds(Path(a.seed) if getattr(a, "seed", None) else None)
@@ -341,7 +377,7 @@ def main() -> int:
         cp = Path(a.cache) if getattr(a, "cache", None) else (
             Path.home() / ".cache" / "slopfirewall" / "cache.json")
         cache = _Cache(cp)
-    report, code = check_packages(names, seeds, cache)
+    report, code = check_packages(names, seeds, cache, workers=a.workers)
     print((scanned_note + "\n" if scanned_note else "") + report)
     return code
 

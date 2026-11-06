@@ -1,0 +1,78 @@
+{
+  "case": "case-003-disk-full-log-flood",
+  "difficulty": "easy-medium",
+  "service": "支付网关服务 payment-gateway",
+  "symptom": "03:47 起全部支付请求 5xx，主机磁盘使用率 100%，应用报 No space left on device。",
+  "inputs": {
+    "deploy_log": [
+      {
+        "time": "4 天前 10:00",
+        "event": "payment-gateway v3.7.0 上线（新渠道接入：新增风控前置调用 risk-check）"
+      },
+      {
+        "time": "上线后 4 天",
+        "event": "一切正常，磁盘稳定在 65-70%"
+      }
+    ],
+    "alerts": [
+      {
+        "time": "03:10",
+        "rule": "disk_used_ratio > 0.90",
+        "source": "payment-gateway-prod-2"
+      },
+      {
+        "time": "03:45",
+        "rule": "disk_used_ratio = 1.00",
+        "source": "payment-gateway-prod-2"
+      },
+      {
+        "time": "03:47",
+        "rule": "HTTP 5xx ratio > 30%",
+        "source": "payment-gateway"
+      }
+    ],
+    "disk_metrics": [
+      {
+        "time": "00:40",
+        "used_ratio": 0.68
+      },
+      {
+        "time": "02:40",
+        "used_ratio": 0.88
+      },
+      {
+        "time": "03:30",
+        "used_ratio": 0.99
+      },
+      {
+        "time": "03:45",
+        "used_ratio": 1.00
+      }
+    ],
+    "df_output": [
+      "Filesystem      Size  Used  Use%  Mounted on",
+      "/dev/nvme0n1p1   64G   64G  100%  /",
+      "",
+      "/var/log  总计 47G：",
+      "  debug.log          44G  （修改时间：03:46:59，仍在增长）",
+      "  app.log             2.1G",
+      "  journal/            0.9G"
+    ],
+    "logs": [
+      {
+        "time": "02:30:11",
+        "source": "payment-gateway",
+        "level": "ERROR",
+        "msg": "risk-check timeout after 3s, request_id=pay-8812 —— 打印全量堆栈 + 完整请求体（渠道号/金额/卡号掩码），单条约 1.2MB"
+      },
+      {
+        "time": "02:30-03:45",
+        "source": "payment-gateway",
+        "level": "统计",
+        "msg": "同型 ERROR 日志约 6000 条/分钟，单条 1.2MB ≈ 7GB/小时写入 /var/log/debug.log"
+      }
+    ]
+  },
+  "notes": "案例为合成数据，事故模式参照真实生产事故设计。故意放了两个干扰项：4 天前的发布（上线后稳定运行了 4 天，磁盘是 3 小时内打满的——时间错位）；以及“重启服务”（磁盘满重启不解决问题，还可能因写不了文件起不来）。",
+  "ground_truth_ref": "ground_truth.json"
+}

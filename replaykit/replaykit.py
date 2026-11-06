@@ -46,6 +46,8 @@ class Recorder:
     """把 agent 每一步的 (step, tool, args, result) 写成 JSONL 轨迹。"""
 
     def __init__(self, path: Path | str) -> None:
+        # 轨迹路径来自操作者命令行（本地工具，与 pytest 同一信任边界）；
+        # 好坏行判定见 read_trace：坏行跳过不伪装成事实
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._f = open(self.path, "w", encoding="utf-8")

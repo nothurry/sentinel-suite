@@ -120,6 +120,26 @@ def main():
     finally:
         sf._http_status = orig_status
 
+    # v0.5：并发核查 + 修复"只查前 16 个"的静默截断（mock 网络，无需真请求）
+    sf._http_status = lambda url: 404
+    try:
+        many = [f"pkg{i:02d}-zz" for i in range(20)]
+        report_m, code_m = sf.check_packages(many, seeds, None, workers=8)
+        check("SF 超 16 个不截断（并发核查 20 个）",
+              code_m == sf.EXIT_HALLUCINATION
+              and sum("❌" in ln for ln in report_m.splitlines()) == 20, report_m[:120])
+    finally:
+        sf._http_status = orig_status
+
+    # v0.5：缓存 put 只改内存、flush 批量落盘
+    cfile = tmp / "cache" / "c.json"
+    cobj = sf._Cache(cfile)
+    cobj.put("x-pkg-zz", "ok")
+    check("SF 缓存 put 不立即写盘", not cfile.exists())
+    cobj.flush()
+    check("SF 缓存 flush 落盘且可回读",
+          cfile.exists() and sf._Cache(cfile).get("x-pkg-zz") == "ok")
+
     # 目录扫描（v0.1）：requirements*.txt + pyproject.toml
     proj = tmp / "proj"
     (proj / ".venv").mkdir(parents=True)
@@ -282,6 +302,17 @@ def main():
     r2b, c2b = ob.score_case(case2, bad2)
     check("OB case-002 干扰答案 FAIL（回滚禁现词+必答项未中）",
           c2b == ob.EXIT_FAIL and "回滚" in r2b and "一票否决" in r2b, r2b[:150])
+
+    # case-003（v0.5）：磁盘写满/日志膨胀模式
+    case3 = ROOT / "opsbench" / "cases" / "case-003"
+    r3g, c3g = ob.score_case(case3, case3 / "answer.example.md")
+    check("OB case-003 标准答案 PASS", c3g == ob.EXIT_PASS and "PASS" in r3g, r3g[:150])
+    bad3 = tmp / "bad3.md"
+    bad3.write_text("这是 4 天前 v3.7.0 发布引入的问题，应该立即回滚发布、重启服务，磁盘满了可以扩容磁盘解决。",
+                    encoding="utf-8")
+    r3b, c3b = ob.score_case(case3, bad3)
+    check("OB case-003 干扰答案 FAIL（扩容禁现词+发布时间错位）",
+          c3b == ob.EXIT_FAIL and "禁现词" in r3b and "一票否决" in r3b, r3b[:150])
 
     failed = [n for n, ok in results if not ok]
     print(f"\n{'全部通过' if not failed else '失败: ' + ', '.join(failed)}"

@@ -41,7 +41,10 @@ TIMEOUT_S = 20.0
 _CALL_RE = re.compile(r"^([A-Za-z_]\w*)\s*\((.*)\)$", re.S)
 EXIT_SAME, EXIT_DIFF, EXIT_ERROR = 0, 1, 2
 
-# 子进程里跑的对比器：加载 old/new 两个模块，逐用例执行并打印 JSON 行
+# 子进程里跑的对比器：加载 old/new 两个模块，逐用例执行并打印 JSON 行。
+# 信任边界：与 pytest/ruff 等本地开发工具相同——被加载的 old/new 是**操作者本机
+# 指定的文件**，执行它们与操作者自己运行该文件没有区别。本工具不承担沙箱职能，
+# 不要用它加载来源不明的文件。
 _RUNNER = r'''
 import json, sys, types
 

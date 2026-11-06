@@ -4,6 +4,17 @@
 
 本仓库遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号用 [SemVer](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-10-30
+
+### Added
+- SlopFirewall 并发核查：`check/scan --workers N`（默认 8，上限 16）。实测 20 个包名 14.4s → 2.8s（5.2×），批量扫描项目清单体感明显。
+- OpsBench 第三个案例 case-003（支付网关磁盘写满：日志膨胀模式；干扰项 = 发布时间错位 + "扩容磁盘"式治标方案）。
+- CI 矩阵加入 Python 3.14。
+
+### Fixed
+- SlopFirewall 静默截断：包名超过 16 个时只核查前 16 个、其余直接跳过——现在全部核查。
+- `_Cache` 线程安全（put/get 加锁）并改为 flush 批量落盘（原先每核查一个名字就整文件重写一次）。
+
 ## [0.4.0] - 2026-10-24
 
 ### Added

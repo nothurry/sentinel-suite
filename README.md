@@ -125,7 +125,7 @@ python tests/test_web.py       # Web 前端 API 冒烟（自动起停服务）
 ## 状态
 
 - DiffVerifier、SlopFirewall、ReplayKit：**可用**。v0.1 新增：DiffVerifier 签名感知自动用例（`--auto`）、SlopFirewall typosquat 检测与项目目录扫描、ReplayKit 不稳定步识别（`--repeat`）与双轨迹 `compare`。边界见各自 README。
-- PostTrain-Doctor、OpsBench：**尺子立起来了**。v0.1 新增：F5 奖励方差塌缩、F6 长度-奖励相关、复查样本导出（`--export`）；第二个 RCA 案例（case-002 连接泄漏）与评分文本归一化。仍是启发式与关键词级评分——论文指标的精确复现、语义评分层在路线图上。我们不伪造精确度。
+- PostTrain-Doctor、OpsBench：**尺子立起来了**。v0.1 新增：F5 奖励方差塌缩、F6 长度-奖励相关、复查样本导出（`--export`）；现有三个 RCA 案例（Redis 淘汰风暴、连接泄漏、磁盘写满）与评分文本归一化。仍是启发式与关键词级评分——论文指标的精确复现、语义评分层在路线图上。我们不伪造精确度。
 
 ## 贡献
 

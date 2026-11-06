@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 EXIT_USAGE = 3
-VERSION = "0.4.0"
+VERSION = "0.5.0"
 
 # 子命令 → 模块文件。各工具 main() 自己解析 sys.argv，
 # 转发前把 argv[0] 改成 "sentinel.py <cmd>"，--help 里显示得体。
